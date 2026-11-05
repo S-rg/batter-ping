@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "batter-ping"
+version = "0.1.0"
+description = "Cricket Live Player Tracker CLI for cron notifications"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "python-espncricinfo>=1.1.0",
+    "PyYAML>=6.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.4.0",
+]
+
+[project.scripts]
+cricket-tracker = "cricket_tracker.cli:main"
+cricket-resolve-players = "cricket_tracker.cli:resolve_players_main"
+
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

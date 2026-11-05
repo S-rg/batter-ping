@@ -1,0 +1,23 @@
+state_file: ./state.json
+max_workers: 3
+squads_recheck_seconds: 600
+xi_recheck_seconds: 300
+evict_after_seconds: 86400
+alert_after_failed_runs: 3
+request_timeout_seconds: 10
+
+notify:
+  lineup: true
+  batting: true
+
+notifier:
+  type: discord_dm
+  bot_token: ${DISCORD_BOT_TOKEN}
+  user_ids:
+    - ${DISCORD_USER_ID}
+  admin_user_id: ${DISCORD_ADMIN_USER_ID}
+
+players:
+  - { id: 253802, name: Virat Kohli }
+  - { id: 625383, name: Jasprit Bumrah }
+

@@ -1,0 +1,18 @@
+state_file: ./test_state.json
+max_workers: 4
+squads_recheck_seconds: 600
+xi_recheck_seconds: 300
+evict_after_seconds: 21600
+alert_after_failed_runs: 3
+request_timeout_seconds: 10
+
+notify:
+  lineup: true
+  batting: true
+
+notifier:
+  type: console
+
+players:
+  - { id: 253802, name: Virat Kohli }
+  - { id: 625383, name: Jasprit Bumrah }
