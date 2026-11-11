@@ -127,3 +127,31 @@ players: []
     with pytest.raises(ConfigError) as exc_info:
         load_config(cfg_file, validate_notifier=True)
     assert "notifier.bot_token is required" in str(exc_info.value)
+
+
+def _minimal_config(tmp_path: Path, extra: str = "") -> Path:
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(
+        f"state_file: ./s.json\n{extra}\nnotifier:\n  type: console\n"
+        "players:\n  - { id: 1, name: A }\n",
+        encoding="utf-8",
+    )
+    return cfg_file
+
+
+def test_browser_defaults_favor_low_ram(tmp_path: Path) -> None:
+    cfg = load_config(_minimal_config(tmp_path))
+    assert cfg.browser_max_tabs == 4
+    assert cfg.fetch_budget_seconds == 30
+    assert cfg.browser_javascript is False
+
+
+def test_browser_settings_parsed(tmp_path: Path) -> None:
+    cfg = load_config(_minimal_config(tmp_path, "browser_max_tabs: 3\nbrowser_javascript: 'true'"))
+    assert cfg.browser_max_tabs == 3
+    assert cfg.browser_javascript is True
+
+
+def test_browser_tabs_must_be_positive(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError):
+        load_config(_minimal_config(tmp_path, "browser_max_tabs: 0"))

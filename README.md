@@ -1,36 +1,88 @@
 # Cricket Live Player Tracker
 
-A lightweight, robust Python CLI executed via cron to track specific cricket players to ensure you can always catch when they are batting.
+A lightweight Python CLI, run from cron, that watches live cricket on ESPNcricinfo and messages
+you (Discord DM, Discord webhook, or the console) when players you follow are named in a playing
+XI and when they walk out to bat.
 
-Built with `python-espncricinfo`.
+Match data comes from [python-espncricinfo](https://github.com/outside-edge/python-espncricinfo)
+by Derek Willis and Gaurav Sood. This repo ships a lightly modified copy of it in
+`vendor/python-espncricinfo` that uses far less RAM. See [Credits](#credits-and-license) for
+what changed.
+
+---
+
+## Requirements
+
+- **Python 3.12 or newer** (required by python-espncricinfo)
+- **Linux or macOS** (the run lock uses `fcntl.flock`)
+- **Playwright's WebKit browser.** ESPNcricinfo's CDN blocks plain HTTP clients, so match pages
+  are loaded in a headless browser. Installing its system libraries on Linux needs `sudo`.
+- **About 350 MB of free RAM** while a run is fetching (one browser, one tab). Busy days may open
+  a few more tabs, at about 100 MB each (see [Memory use](#memory-use)).
 
 ---
 
 ## Installation
 
-### 1. Requirements
-
-- Python 3.10 or higher
-- Linux / macOS (for `fcntl.flock` support)
-- Playwright WebKit browser (used by `python-espncricinfo` to bypass CDN blocks)
-
-### 2. Setup Virtual Environment
+### 1. Get the code
 
 ```bash
-git clone https://github.com/your-username/cricket-ping.git
-cd cricket-ping
+git clone https://github.com/S-rg/batter-ping.git
+cd batter-ping
+```
 
-python3 -m venv .venv
+### 2. Create a virtual environment
+
+```bash
+python3.12 -m venv .venv
 source .venv/bin/activate
+```
+
+### 3. Install the vendored library, then the tracker
+
+```bash
+pip install -e vendor/python-espncricinfo
 pip install -e .
+```
+
+The order matters. The tracker depends on `python-espncricinfo`. If the vendored copy is not
+installed first, pip downloads the original release from PyPI instead, and you lose the memory
+savings. To check which copy is in use:
+
+```bash
+python -c "import espncricinfo, os; print(os.path.dirname(espncricinfo.__file__))"
+```
+
+The printed path should end in `vendor/python-espncricinfo/espncricinfo`.
+
+For development (pytest and ruff), use `pip install -e ".[dev]"` in place of `pip install -e .`.
+
+### 4. Install the WebKit browser
+
+```bash
 playwright install --with-deps webkit
 ```
+
+`--with-deps` also installs the system libraries WebKit needs, and asks for `sudo` on Linux. If
+they are already installed, `playwright install webkit` is enough.
+
+### 5. Check it works
+
+```bash
+cricket-tracker --help
+cricket-tracker --config config.yaml --dry-run --verbose
+```
+
+A dry run fetches the live match list from ESPNcricinfo and prints what it would send. It needs
+no Discord setup, saves no state and sends nothing. A line such as
+`live=0 lineups=0 ... errors=0` means everything is working. `live=0` just means no matches are
+in progress at the moment.
 
 ---
 
 ## Configuration
 
-Copy `config.yaml` or edit the default:
+Edit `config.yaml`, or copy it and point `--config` at your copy:
 
 ```yaml
 state_file: ./state.json
@@ -40,6 +92,9 @@ xi_recheck_seconds: 300
 evict_after_seconds: 86400
 alert_after_failed_runs: 3
 request_timeout_seconds: 10
+browser_max_tabs: 4         # upper limit on browser tabs (each ~100 MB)
+fetch_budget_seconds: 30    # use the fewest tabs that finish each batch in this time
+browser_javascript: false   # page scripts aren't needed for the data; off saves RAM
 
 notify:
   lineup: true
@@ -57,7 +112,27 @@ players:
   - { id: 625383, name: Jasprit Bumrah }
 ```
 
-Environment variables and defaults like `${DISCORD_BOT_TOKEN}` or `${VAR:-default}` can be used anywhere in the config file.
+You can use environment variables anywhere in the file, as `${VAR}` or with a default as
+`${VAR:-default}`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `state_file` | (required) | Where run state is kept. Relative paths are relative to the config file. |
+| `max_workers` | `8` | Most matches fetched in parallel. In practice the tab planning below sets the limit. |
+| `squads_recheck_seconds` | `600` | How often to recheck a match whose squad is known but whose XI isn't announced yet. |
+| `xi_recheck_seconds` | `300` | How often to recheck a match once the XI is known. |
+| `evict_after_seconds` | `21600` | Forget a match this long after it was last seen live. |
+| `alert_after_failed_runs` | `3` | Send an admin alert after this many runs in a row fail to load the live match list. |
+| `request_timeout_seconds` | `10` | Timeout for Discord API requests. |
+| `browser_max_tabs` | `4` | The most browser tabs open at once. |
+| `fetch_budget_seconds` | `30` | Before each batch, open the fewest tabs expected to finish it in this time. |
+| `browser_javascript` | `false` | Run ESPNcricinfo's page scripts. Not needed, because the data is in the page HTML. |
+| `notify.lineup` | `true` | Alert when a tracked player is named in a playing XI. |
+| `notify.batting` | `true` | Alert when a tracked player comes in to bat, once per innings. |
+| `notifier.type` | `console` | `console`, `discord_dm`, or `discord_webhook`. |
+| `notifier.bot_token`, `notifier.user_ids` | | Required for `discord_dm`. `admin_user_id` gets health alerts. |
+| `notifier.webhook_url` | | Required for `discord_webhook`. Optional: `admin_webhook_url`, and `batting_mention` (e.g. `<@&role_id>`). |
+| `players` | | The players to track: `{ id, name }` entries. |
 
 ### Discord Bot Setup (for Direct Messages)
 
@@ -98,55 +173,15 @@ players:
 
 ## Usage
 
-### 1. Test Discord DM delivery (Quick Test)
-
-Verify that your bot token and user ID can send DMs immediately:
-
-```bash
-python -c "
-from cricket_tracker.notifiers.discord_dm import DiscordDMNotifier
-import os
-notifier = DiscordDMNotifier(bot_token=os.environ['DISCORD_BOT_TOKEN'], user_ids=[os.environ['DISCORD_USER_ID']])
-notifier.alert('🏏 Test message from Cricket Tracker!')
-print('DM sent successfully!')
-"
-```
-
-### 2. Run a dry run
-
-Run with `--dry-run` to print live match checks and potential alerts to the console without saving state or sending Discord notifications:
-
-```bash
-cricket-tracker --config config.yaml --dry-run --verbose
-```
-
-### 3. Run a live check
-
-Run once manually with full live fetching and notifications:
-
-```bash
-cricket-tracker --config config.yaml --verbose
-```
-
-### 4. Clear state
-
-If you ever need to safely reset the state cache:
-
-```bash
-cricket-tracker --config config.yaml --reset-state
-```
-
----
-
 ## Cron Deployment
 
 Add a crontab entry to run the tracker every 5 minutes:
 
 ```cron
-*/5 * * * * cd /opt/cricket-ping && DISCORD_BOT_TOKEN="..." DISCORD_USER_ID="..." /opt/cricket-ping/.venv/bin/cricket-tracker --config config.yaml >> /var/log/cricket_tracker.log 2>&1
+*/5 * * * * cd /opt/batter-ping && DISCORD_BOT_TOKEN="..." DISCORD_USER_ID="..." /opt/batter-ping/.venv/bin/cricket-tracker --config config.yaml >> /var/log/cricket_tracker.log 2>&1
 ```
 
-### Logrotate Configuration
+## Logrotate Configuration
 
 Create `/etc/logrotate.d/cricket_tracker`:
 
@@ -164,15 +199,93 @@ Create `/etc/logrotate.d/cricket_tracker`:
 
 ---
 
+## Memory use
+
+Each run starts **one** headless WebKit browser and reuses its tabs:
+
+- Each fetch borrows an idle tab, loads the page and reads it. The tab is then cleared
+  (`about:blank`) and returned to the pool.
+- Before each batch of fetches, the tracker picks the fewest tabs expected to finish the batch
+  within `fetch_budget_seconds`. The estimate uses how long fetches have actually taken during
+  the run, and is capped at `browser_max_tabs`. One or two live matches use a single tab.
+- Images, fonts, stylesheets and media are not downloaded, and page JavaScript is off by default.
+- The browser closes at the end of every run, so nothing stays in memory between cron runs.
+
+If memory is tight, raise `fetch_budget_seconds` (e.g. to `120`) or set `browser_max_tabs: 1`.
+Runs get slower but stay at one tab. If you need runs to finish faster, do the opposite.
+
+---
+
 ## Development & Testing
 
-Run unit tests:
+Install with the dev extras (`pip install -e vendor/python-espncricinfo -e ".[dev]"`), then:
+
 ```bash
 pytest tests/ -v
 ```
 
-Run code formatting and linting:
 ```bash
 ruff check .
 ruff format --check .
 ```
+
+The vendored library has its own test suite:
+
+```bash
+cd vendor/python-espncricinfo && pytest -o addopts="" -q
+```
+
+---
+
+## Credits and License
+
+### python-espncricinfo
+
+All ESPNcricinfo scraping and parsing is done by
+**[python-espncricinfo](https://github.com/outside-edge/python-espncricinfo)**, written and
+maintained by **Derek Willis** and **Gaurav Sood**
+([PyPI](https://pypi.org/project/python-espncricinfo/),
+[docs](https://outside-edge.github.io/python-espncricinfo/)). It is released under the MIT
+License, Copyright (c) 2015 Derek Willis. The original license is kept unchanged at
+[`vendor/python-espncricinfo/LICENSE.txt`](vendor/python-espncricinfo/LICENSE.txt), and the
+upstream citation metadata is in
+[`CITATION.cff`](vendor/python-espncricinfo/CITATION.cff). If you use that library in your own
+work, please cite it as that file asks.
+
+`vendor/python-espncricinfo` is a copy of upstream version **1.1.0** (commit
+[`f88219a`](https://github.com/outside-edge/python-espncricinfo/commit/f88219a47a8de29f4a41ea8fe6f5d1d578a922cf),
+taken 2026-11-11), with the changes below. They are this project's changes, not the upstream
+authors' work, so please don't report problems with them upstream.
+
+**Why:** upstream starts a new Playwright WebKit browser for every page fetch. This tracker
+fetches several matches in parallel, so it ended up running several full browsers at once, and
+peaked at about 3.5 GB of RAM fetching 6 matches.
+
+**What changed:**
+
+- **New `espncricinfo/_browser.py`: one shared browser per process.** It is started on first
+  use, runs on its own background thread and event loop, is relaunched if it crashes, and is
+  closed when Python exits.
+- **Tabs are reused, not created per fetch.** Each tab is cleared between fetches, and replaced
+  after 50 fetches or after any failed fetch.
+- **The tab limit can change during a run, and a planner sizes it.** `plan_pages()` returns the
+  fewest tabs that should finish a batch in a time budget, based on a running average of real
+  fetch times. Lowering the limit closes surplus idle tabs straight away.
+- **Images, fonts, stylesheets and media are blocked.** Page JavaScript can be turned off; it is
+  on by default in the library and off by default in this tracker.
+- **`espncricinfo/match.py`:** `_playwright_fetch()` and `_async_playwright_fetch()` now use the
+  shared browser. Their signatures are unchanged, and they still work from inside a running event
+  loop (e.g. Jupyter).
+- **New public functions in `espncricinfo`:** `configure_browser()`, `plan_pages()` and
+  `close_browser()`.
+- **New tests** in `tests/test_browser.py`. The rest of the library is unchanged, and all
+  upstream tests still pass.
+
+The full list is in [`vendor/python-espncricinfo/CHANGELOG.md`](vendor/python-espncricinfo/CHANGELOG.md),
+under "Vendored modifications".
+
+### ESPNcricinfo
+
+Neither this project nor python-espncricinfo is affiliated with ESPNcricinfo or ESPN. Match data
+belongs to ESPNcricinfo. Use it for personal, non-commercial purposes, and keep polling to a
+reasonable rate (the default every-5-minutes cron is gentle).

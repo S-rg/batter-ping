@@ -43,3 +43,16 @@ htmlcov/
 # Local application state and locks
 state.json*
 *.lock
+
+# Vendored libraries (vendor/)
+# vendor/python-espncricinfo is committed as plain source. Its own .gitignore
+# (kept from upstream) already skips caches, .venv and build output inside it.
+# Keep upstream's lockfile, which the "*.lock" rule above would otherwise drop
+# (that rule is meant for the tracker's state lock files).
+!vendor/*/uv.lock
+# Local tool and editor state that should never be committed with vendored code.
+vendor/**/.claude/
+vendor/**/.idea/
+vendor/**/.vscode/
+vendor/**/.coverage
+vendor/**/htmlcov/

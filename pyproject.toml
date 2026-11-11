@@ -7,7 +7,7 @@ name = "batter-ping"
 version = "0.1.0"
 description = "Cricket Live Player Tracker CLI for cron notifications"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "python-espncricinfo>=1.1.0",
     "PyYAML>=6.0",

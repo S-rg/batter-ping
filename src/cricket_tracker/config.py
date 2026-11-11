@@ -48,6 +48,9 @@ class AppConfig:
     notify: NotifyConfig
     notifier: NotifierConfig
     players: list[TrackedPlayer] = field(default_factory=list)
+    browser_max_tabs: int = 4
+    fetch_budget_seconds: int = 30
+    browser_javascript: bool = False
 
 
 def _expand_env_vars(val: Any) -> Any:
@@ -110,6 +113,15 @@ def load_config(config_path: str | Path, validate_notifier: bool = True) -> AppC
     evict_after_seconds = get_pos_int("evict_after_seconds", 21600)
     alert_after_failed_runs = get_pos_int("alert_after_failed_runs", 3)
     request_timeout_seconds = get_pos_int("request_timeout_seconds", 10)
+    browser_max_tabs = get_pos_int("browser_max_tabs", 4)
+    fetch_budget_seconds = get_pos_int("fetch_budget_seconds", 30)
+
+    raw_js = data.get("browser_javascript", False)
+    if isinstance(raw_js, str):
+        if raw_js.strip().lower() not in ("true", "false", "yes", "no", "1", "0", ""):
+            raise ConfigError(f"browser_javascript must be true or false, got {raw_js!r}")
+        raw_js = raw_js.strip().lower() in ("true", "yes", "1")
+    browser_javascript = bool(raw_js)
 
     raw_notify = data.get("notify", {})
     if not isinstance(raw_notify, dict):
@@ -214,4 +226,7 @@ def load_config(config_path: str | Path, validate_notifier: bool = True) -> AppC
         notify=notify,
         notifier=notifier,
         players=players,
+        browser_max_tabs=browser_max_tabs,
+        fetch_budget_seconds=fetch_budget_seconds,
+        browser_javascript=browser_javascript,
     )

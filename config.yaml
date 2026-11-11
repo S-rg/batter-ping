@@ -5,6 +5,9 @@ xi_recheck_seconds: 300
 evict_after_seconds: 86400
 alert_after_failed_runs: 3
 request_timeout_seconds: 10
+browser_max_tabs: 4         # upper limit on browser tabs (each ~100 MB)
+fetch_budget_seconds: 30    # use the fewest tabs that finish each batch in this time
+browser_javascript: false   # page scripts aren't needed for the data; off saves RAM
 
 notify:
   lineup: true

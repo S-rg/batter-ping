@@ -106,6 +106,9 @@ def main(argv: list[str] | None = None) -> int:
     registry = PlayerRegistry(config.players)
     source = EspnSource(
         timeout_seconds=config.request_timeout_seconds,
+        max_tabs=config.browser_max_tabs,
+        fetch_budget_seconds=config.fetch_budget_seconds,
+        javascript=config.browser_javascript,
     )
     notifier = build_notifier(config, dry_run=args.dry_run)
 
@@ -157,6 +160,7 @@ def main(argv: list[str] | None = None) -> int:
                         pass
                     state.set_health_alert_sent(False)
         finally:
+            source.close()
             if not args.dry_run:
                 try:
                     state.save()

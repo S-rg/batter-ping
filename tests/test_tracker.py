@@ -453,3 +453,44 @@ def test_substitute_impact_player_alert_on_batting(tmp_path: Path) -> None:
     assert len(notifier.batting_alerts) == 1
     assert notifier.batting_alerts[0].batters[0][0].id == 500
     assert rec["players"]["500"]["status"] == LineupStatus.IN_XI.value
+
+
+def test_source_concurrency_plan_caps_parallel_fetches(tmp_path: Path) -> None:
+    import threading
+    import time as _time
+
+    class PlannedSource(FakeSource):
+        def __init__(self, **kw) -> None:
+            super().__init__(**kw)
+            self.plans: list[int] = []
+            self.active = 0
+            self.peak = 0
+            self._lock = threading.Lock()
+
+        def plan_concurrency(self, fetches: int) -> int:
+            self.plans.append(fetches)
+            return 2
+
+        def get_match_info(self, match_id: int) -> MatchInfo:
+            with self._lock:
+                self.active += 1
+                self.peak = max(self.peak, self.active)
+            _time.sleep(0.02)
+            with self._lock:
+                self.active -= 1
+            return super().get_match_info(match_id)
+
+    ids = list(range(1, 7))
+    source = PlannedSource(live_ids=ids, matches={i: make_match_info(i) for i in ids})
+    tracker = Tracker(
+        source=source,
+        state=StateStore(tmp_path / "state.json"),
+        registry=PlayerRegistry([TrackedPlayer(100, "Virat Kohli")]),
+        notifier=RecordingNotifier(),
+        max_workers=8,
+        clock=lambda: 1000.0,
+    )
+    res = tracker.run()
+    assert res.lineups_fetched == 6
+    assert source.plans == [6]
+    assert source.peak <= 2

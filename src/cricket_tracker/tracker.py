@@ -44,6 +44,17 @@ class Tracker:
         self.max_workers = max_workers
         self.clock = clock
 
+    def _plan_workers(self, fetches: int) -> int:
+        """Threads for a batch: what the source can usefully run at once, capped."""
+        workers = min(self.max_workers, fetches)
+        plan = getattr(self.source, "plan_concurrency", None)
+        if plan is not None:
+            try:
+                workers = min(workers, max(1, int(plan(fetches))))
+            except Exception:
+                logger.exception("Concurrency planning failed; using %d workers", workers)
+        return workers
+
     def run(self) -> RunResult:
         now = self.clock()
         result = RunResult()
@@ -64,7 +75,7 @@ class Tracker:
 
         to_fetch = [m for m in live_ids if self.state.needs_match_fetch(m, now)]
         if to_fetch:
-            workers = min(self.max_workers, len(to_fetch))
+            workers = self._plan_workers(len(to_fetch))
             with ThreadPoolExecutor(max_workers=workers) as executor:
                 future_to_mid = {
                     executor.submit(self.source.get_match_info, mid): mid for mid in to_fetch
@@ -123,7 +134,7 @@ class Tracker:
 
         live_batting_map: dict[int, LiveBatting] = {}
         if hot_matches:
-            workers = min(self.max_workers, len(hot_matches))
+            workers = self._plan_workers(len(hot_matches))
             with ThreadPoolExecutor(max_workers=workers) as executor:
                 future_to_mid = {
                     executor.submit(self.source.get_live_batting, mid): mid for mid in hot_matches

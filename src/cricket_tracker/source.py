@@ -22,6 +22,9 @@ class Source(Protocol):
 
     def get_live_batting(self, match_id: int) -> LiveBatting: ...
 
+    # Optional: plan_concurrency(fetches: int) -> int prepares for a batch of
+    # fetches and returns how many to run at once (see EspnSource).
+
 
 def parse_match_info(data: dict[str, Any], match_id: int, now: float | None = None) -> MatchInfo:
     if now is None:
@@ -272,11 +275,45 @@ def _patch_espn_normalize() -> None:
 
 
 class EspnSource:
-    def __init__(self, timeout_seconds: int = 10, max_retries: int = 2) -> None:
+    def __init__(
+        self,
+        timeout_seconds: int = 10,
+        max_retries: int = 2,
+        max_tabs: int = 4,
+        fetch_budget_seconds: float = 30,
+        javascript: bool | None = None,
+    ) -> None:
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         self._match_cache: dict[int, dict[str, Any]] = {}
         _patch_espn_normalize()
+        # All fetches share one browser that reuses a small pool of tabs; before each
+        # batch, plan_concurrency() sizes the pool. javascript=False skips page
+        # scripts, which the server-rendered __NEXT_DATA__ doesn't need.
+        self.max_tabs = max_tabs
+        self.fetch_budget_seconds = fetch_budget_seconds
+        from espncricinfo import configure_browser
+
+        configure_browser(max_pages=1, javascript=javascript)
+
+    def plan_concurrency(self, fetches: int) -> int:
+        """Size the tab pool for a batch: the fewest tabs that fit the time budget.
+
+        Based on how long fetches have actually been taking this run, so slow
+        network days get more tabs and quiet days stay on one.
+        """
+        from espncricinfo import configure_browser, plan_pages
+
+        tabs = plan_pages(fetches, self.fetch_budget_seconds, self.max_tabs)
+        configure_browser(max_pages=tabs)
+        logger.debug("Planned %d tab(s) for %d fetch(es)", tabs, fetches)
+        return tabs
+
+    def close(self) -> None:
+        """Shut down the shared headless browser (it relaunches on the next fetch)."""
+        from espncricinfo import close_browser
+
+        close_browser()
 
     def clear_cache(self) -> None:
         self._match_cache.clear()
